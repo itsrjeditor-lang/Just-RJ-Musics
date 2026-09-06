@@ -58,6 +58,7 @@ import com.example.ui.screens.library.LibraryScreen
 import com.example.ui.screens.library.PlaylistDetailScreen
 import com.example.ui.screens.notifications.NotificationsScreen
 import com.example.ui.screens.profile.ProfileScreen
+import com.example.ui.screens.profile.PublicArtistProfileScreen
 import com.example.ui.screens.search.SearchScreen
 import com.example.ui.screens.splash.SplashScreen
 import com.example.ui.screens.upload.UploadSongScreen
@@ -108,6 +109,7 @@ fun RjMusicsApp() {
     val userReactions by viewModel.userReactions.collectAsState()
     val registeredAccounts by viewModel.registeredAccounts.collectAsState()
     val follows by viewModel.follows.collectAsState()
+    val allPublicProfiles by viewModel.allPublicProfiles.collectAsState()
 
     // Player State
     val playerState by viewModel.playerState.collectAsState()
@@ -128,6 +130,8 @@ fun RjMusicsApp() {
             showFullPlayer = false
         } else if (currentScreen is Screen.PlaylistDetail) {
             viewModel.navigateTo(Screen.Library)
+        } else if (currentScreen is Screen.UserProfileView) {
+            viewModel.navigateTo(Screen.Search)
         } else if (currentScreen is Screen.UploadSong || currentScreen is Screen.AdminDashboard) {
             viewModel.navigateTo(Screen.Profile)
         } else if (currentScreen is Screen.Notifications) {
@@ -140,7 +144,7 @@ fun RjMusicsApp() {
     }
 
     val isAuthScreen = currentScreen is Screen.Splash || currentScreen is Screen.Login || currentScreen is Screen.SignUp || currentScreen is Screen.ForgotPassword
-    val isFullScreenModal = currentScreen is Screen.UploadSong || currentScreen is Screen.AdminDashboard || currentScreen is Screen.Notifications || currentScreen is Screen.PlaylistDetail
+    val isFullScreenModal = currentScreen is Screen.UploadSong || currentScreen is Screen.AdminDashboard || currentScreen is Screen.Notifications || currentScreen is Screen.PlaylistDetail || currentScreen is Screen.UserProfileView
 
     val unreadNotificationsCount = notifications.count { !it.isRead }
 
@@ -322,8 +326,7 @@ fun RjMusicsApp() {
                         },
                         onSongOptionsClick = { song -> targetSongForPlaylist = song },
                         onCreatorClick = { username ->
-                            viewModel.setSearchQuery("@$username")
-                            viewModel.navigateTo(Screen.Search)
+                            viewModel.navigateTo(Screen.UserProfileView(username))
                         },
                         onViewAllTrending = {
                             viewModel.setSearchQuery("trending")
@@ -338,12 +341,16 @@ fun RjMusicsApp() {
                         recentSearches = recentSearches,
                         categories = genreCategories,
                         allSongs = songs,
+                        allProfiles = allPublicProfiles,
                         onQueryChange = { viewModel.setSearchQuery(it) },
                         onFilterChange = { viewModel.setSearchFilter(it) },
                         onSongClick = { song -> viewModel.playSong(song, songs) },
                         onSongOptionsClick = { song -> targetSongForPlaylist = song },
                         onGenreCardClick = { genre ->
                             viewModel.setSearchQuery(genre)
+                        },
+                        onProfileClick = { username ->
+                            viewModel.navigateTo(Screen.UserProfileView(username))
                         }
                     )
                 }
@@ -515,8 +522,18 @@ fun RjMusicsApp() {
                     )
                 }
                 is Screen.UserProfileView -> {
-                    viewModel.setSearchQuery("@${screen.username}")
-                    viewModel.navigateTo(Screen.Search)
+                    PublicArtistProfileScreen(
+                        username = screen.username,
+                        currentUserId = currentUser?.uid,
+                        allProfiles = allPublicProfiles,
+                        allSongs = songs,
+                        follows = follows,
+                        playerState = playerState,
+                        onBackClick = { viewModel.navigateTo(Screen.Search) },
+                        onSongClick = { song, queue -> viewModel.playSong(song, queue) },
+                        onSongOptionsClick = { song -> targetSongForPlaylist = song },
+                        onToggleFollow = { targetUid -> viewModel.toggleFollow(targetUid) }
+                    )
                 }
                 is Screen.GenreDetail -> {
                     viewModel.setSearchQuery(screen.genreName)

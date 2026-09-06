@@ -136,7 +136,11 @@ fun ProfileScreen(
         }
     }
 
-    val myUploads = allSongs.filter { it.primaryCreatorUid == user.uid }
+    val myUploads = allSongs.filter {
+        it.primaryCreatorUid == user.uid ||
+        it.primaryCreatorUsername.equals(username, ignoreCase = true) ||
+        (user.isAdmin && (it.primaryCreatorUid == "admin_rj_primary" || it.primaryCreatorUsername.equals("justrjmusics", ignoreCase = true)))
+    }
     val myCollabs = allSongs.filter { it.acceptedCollaboratorUids.contains(user.uid) || it.mentionedUsernames.contains(username) }
     val pendingSongs = allSongs.filter { it.uploadStatus == UploadStatus.PENDING_REVIEW || it.uploadStatus == UploadStatus.CHANGES_REQUESTED }
 

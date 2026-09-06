@@ -1,6 +1,5 @@
 package com.example.ui.screens.search
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,14 +19,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,33 +35,34 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.R
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.data.model.GenreCategory
 import com.example.data.model.Song
 import com.example.data.model.UploadStatus
+import com.example.data.model.UserProfile
 import com.example.ui.components.SongListItemRow
 import com.example.ui.theme.RjBackground
-import com.example.ui.theme.RjBackgroundSecondary
 import com.example.ui.theme.RjBorder
 import com.example.ui.theme.RjCard
 import com.example.ui.theme.RjCardElevated
 import com.example.ui.theme.RjSilverAccent
 import com.example.ui.theme.RjSilverMuted
 import com.example.ui.theme.RjTextMuted
-import com.example.ui.theme.RjTextPrimary
 import com.example.ui.theme.RjTextSecondary
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -72,21 +73,26 @@ fun SearchScreen(
     recentSearches: List<String>,
     categories: List<GenreCategory>,
     allSongs: List<Song>,
+    allProfiles: List<UserProfile> = emptyList(),
     onQueryChange: (String) -> Unit,
     onFilterChange: (String) -> Unit,
     onSongClick: (Song) -> Unit,
     onSongOptionsClick: (Song) -> Unit,
     onGenreCardClick: (String) -> Unit,
+    onProfileClick: (username: String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val filters = listOf("All", "Tracks", "Artists", "Genres")
 
     val publishedSongs = allSongs.filter { it.uploadStatus == UploadStatus.PUBLISHED }
+
+    val rawQ = searchQuery.trim().lowercase()
+    val q = rawQ.removePrefix("@")
+
+    // Filter matching songs
     val searchResults = if (searchQuery.isBlank()) {
         emptyList()
     } else {
-        val rawQ = searchQuery.trim().lowercase()
-        val q = rawQ.removePrefix("@")
         if (rawQ == "trending" || rawQ == "#trending") {
             publishedSongs.sortedBy { it.trendingPosition ?: 999 }
         } else {
@@ -106,6 +112,19 @@ fun SearchScreen(
                             song.genre.lowercase().contains(rawQ) ||
                             song.tags.any { it.lowercase().contains(rawQ) }
                 }
+            }
+        }
+    }
+
+    // Filter matching user and creator profiles
+    val matchingProfiles = remember(allProfiles, q) {
+        if (searchQuery.isBlank()) {
+            emptyList()
+        } else {
+            allProfiles.filter { profile ->
+                profile.displayName.contains(q, ignoreCase = true) ||
+                        profile.username.contains(q, ignoreCase = true) ||
+                        profile.bio.contains(q, ignoreCase = true)
             }
         }
     }
@@ -133,7 +152,7 @@ fun SearchScreen(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = onQueryChange,
-                    placeholder = { Text("Songs, artists, genres, @creators...") },
+                    placeholder = { Text("Songs, artists, @creators...") },
                     leadingIcon = {
                         Icon(Icons.Default.Search, contentDescription = "Search", tint = RjSilverAccent)
                     },
@@ -191,17 +210,126 @@ fun SearchScreen(
                 contentPadding = PaddingValues(bottom = 120.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                item {
-                    Text(
-                        text = "Results (${searchResults.size})",
-                        color = RjSilverMuted,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
+                // When showing Artists or All, display matched Profiles first
+                if ((selectedFilter == "All" || selectedFilter == "Artists") && matchingProfiles.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "Artists & Profiles (${matchingProfiles.size})",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                        )
+                    }
+
+                    items(matchingProfiles) { profile ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onProfileClick(profile.username) }
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            // Avatar
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        Brush.linearGradient(
+                                            listOf(Color(0xFF2A2A2A), Color(0xFF141414))
+                                        )
+                                    )
+                                    .border(1.dp, RjBorder, CircleShape)
+                            ) {
+                                if (!profile.profileImageUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(profile.profileImageUrl)
+                                            .crossfade(true)
+                                            .build(),
+                                        contentDescription = profile.displayName,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Text(
+                                        text = profile.displayName.take(2).uppercase(),
+                                        color = Color.White,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = profile.displayName,
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (profile.verified || profile.isAdmin) {
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(
+                                            Icons.Default.CheckCircle,
+                                            contentDescription = "Verified",
+                                            tint = Color(0xFF3897F0),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "@${profile.username} • Creator",
+                                    color = RjSilverMuted,
+                                    fontSize = 11.sp
+                                )
+                            }
+
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "View Profile",
+                                tint = RjTextMuted,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
                 }
 
-                if (searchResults.isEmpty()) {
+                // Show Songs when filter is All, Tracks, or Genres
+                if (selectedFilter == "All" || selectedFilter == "Tracks" || selectedFilter == "Genres") {
+                    if (searchResults.isNotEmpty()) {
+                        item {
+                            Text(
+                                text = "Songs (${searchResults.size})",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                            )
+                        }
+
+                        items(searchResults) { song ->
+                            SongListItemRow(
+                                song = song,
+                                onClick = { onSongClick(song) },
+                                onMoreClick = { onSongOptionsClick(song) }
+                            )
+                        }
+                    }
+                }
+
+                // Empty state if nothing matched
+                val hasProfiles = (selectedFilter == "All" || selectedFilter == "Artists") && matchingProfiles.isNotEmpty()
+                val hasSongs = (selectedFilter == "All" || selectedFilter == "Tracks" || selectedFilter == "Genres") && searchResults.isNotEmpty()
+
+                if (!hasProfiles && !hasSongs) {
                     item {
                         Box(
                             modifier = Modifier
@@ -211,32 +339,24 @@ fun SearchScreen(
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
-                                    text = "No tracks found for '$searchQuery'",
+                                    text = "No results found for '$searchQuery'",
                                     color = Color.White,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 15.sp
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Try searching by genre, mood or artist name.",
+                                    text = "Search by song title, artist @username, or genre.",
                                     color = RjTextMuted,
                                     fontSize = 12.sp
                                 )
                             }
                         }
                     }
-                } else {
-                    items(searchResults) { song ->
-                        SongListItemRow(
-                            song = song,
-                            onClick = { onSongClick(song) },
-                            onMoreClick = { onSongOptionsClick(song) }
-                        )
-                    }
                 }
             }
         } else {
-            // Default Explore View: Recent Searches & Browse Genre Grid
+            // Default Explore View: Recent Searches, Discover Creators & Browse Genre Grid
             LazyColumn(
                 contentPadding = PaddingValues(bottom = 120.dp),
                 modifier = Modifier.fillMaxSize()
@@ -287,6 +407,87 @@ fun SearchScreen(
                             }
                         }
                         Spacer(modifier = Modifier.height(14.dp))
+                    }
+                }
+
+                // Discover Creators & Profiles Section
+                if (allProfiles.isNotEmpty()) {
+                    item {
+                        Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                            Text(
+                                text = "Discover Creators & Profiles",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                items(allProfiles) { profile ->
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier
+                                            .clickable { onProfileClick(profile.username) }
+                                            .width(76.dp)
+                                    ) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier
+                                                .size(56.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    Brush.linearGradient(
+                                                        listOf(Color(0xFF2A2A2A), Color(0xFF141414))
+                                                    )
+                                                )
+                                                .border(1.5.dp, RjBorder, CircleShape)
+                                        ) {
+                                            if (!profile.profileImageUrl.isNullOrBlank()) {
+                                                AsyncImage(
+                                                    model = ImageRequest.Builder(LocalContext.current)
+                                                        .data(profile.profileImageUrl)
+                                                        .crossfade(true)
+                                                        .build(),
+                                                    contentDescription = profile.displayName,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                            } else {
+                                                Text(
+                                                    text = profile.displayName.take(2).uppercase(),
+                                                    color = Color.White,
+                                                    fontSize = 18.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(6.dp))
+
+                                        Text(
+                                            text = profile.displayName,
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "@${profile.username}",
+                                            color = RjTextMuted,
+                                            fontSize = 9.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(14.dp))
+                        }
                     }
                 }
 

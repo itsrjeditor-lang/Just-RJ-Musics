@@ -89,6 +89,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val recentSearches: StateFlow<List<String>> = repository.recentSearches
     val userReactions: StateFlow<Map<String, ReactionType>> = repository.userReactions
     val follows: StateFlow<Set<Pair<String, String>>> = repository.follows
+    val allPublicProfiles: StateFlow<List<UserProfile>> = repository.allPublicProfiles
     val playerState: StateFlow<PlayerState> = playerManager.playerState
     val genreCategories: List<GenreCategory> = repository.categories
 
@@ -230,6 +231,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun respondToCollabInvite(inviteId: String, accept: Boolean) {
         repository.respondToCollaboration(inviteId, accept)
+    }
+
+    fun toggleFollow(targetUid: String) {
+        repository.toggleFollow(targetUid)
+    }
+
+    fun isFollowing(targetUid: String): Boolean {
+        return repository.isFollowing(targetUid)
     }
 
     // Playlists

@@ -138,10 +138,65 @@ class AppRepository(private val context: Context) {
     private val _registeredAccountsFlow = MutableStateFlow<List<StoredAccount>>(emptyList())
     val registeredAccounts: StateFlow<List<StoredAccount>> = _registeredAccountsFlow.asStateFlow()
 
+    // All Public Profiles for Global Search and Cross-Profile Streaming (Spotify style)
+    private val _allPublicProfiles = MutableStateFlow<List<UserProfile>>(emptyList())
+    val allPublicProfiles: StateFlow<List<UserProfile>> = _allPublicProfiles.asStateFlow()
+
     init {
         loadRegisteredAccounts()
         initializeInitialData()
         loadSavedData()
+        refreshPublicProfiles()
+    }
+
+    fun refreshPublicProfiles() {
+        try {
+            val list = mutableListOf<UserProfile>()
+            // Admin Sub-Profiles (Artists & Creators)
+            val subProfiles = _adminSubProfiles.value
+            for (sub in subProfiles) {
+                list.add(
+                    UserProfile(
+                        uid = "admin_" + sub.profileId,
+                        email = "itsrjeditor@gmail.com",
+                        displayName = sub.displayName,
+                        username = sub.username,
+                        bio = sub.bio.ifBlank { "Official Just RJ Musics Artist & Producer." },
+                        instagramUsername = sub.instagramUsername,
+                        instagramUrl = sub.instagramUrl,
+                        profileImageUrl = sub.profileImageUrl,
+                        followersCount = sub.followersCount,
+                        followingCount = sub.followingCount,
+                        monthlyListeners = sub.monthlyListeners,
+                        verified = true,
+                        isAdmin = true
+                    )
+                )
+            }
+
+            // Registered non-admin accounts
+            for (acc in _registeredAccounts) {
+                if (!acc.isAdmin) {
+                    list.add(
+                        UserProfile(
+                            uid = acc.uid,
+                            email = acc.email,
+                            displayName = acc.displayName,
+                            username = acc.username,
+                            bio = acc.bio.ifBlank { "Music creator on Just RJ Music." },
+                            instagramUsername = acc.instagramUsername,
+                            instagramUrl = acc.instagramUrl,
+                            profileImageUrl = acc.profileImageUrl,
+                            verified = false,
+                            isAdmin = false
+                        )
+                    )
+                }
+            }
+            _allPublicProfiles.value = list
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun loadRegisteredAccounts() {
@@ -246,6 +301,7 @@ class AppRepository(private val context: Context) {
             }
             prefs.edit().putString("registered_accounts_json_v2", jsonArray.toString()).commit()
             _registeredAccountsFlow.value = _registeredAccounts.toList()
+            refreshPublicProfiles()
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -315,6 +371,7 @@ class AppRepository(private val context: Context) {
             _activeAdminProfile.value?.let {
                 prefs.edit().putString("active_admin_profile_id_v1", it.profileId).commit()
             }
+            refreshPublicProfiles()
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -562,28 +619,28 @@ class AppRepository(private val context: Context) {
                     val audioUrl = obj.optString("audioUrl", "")
 
                     val sId = obj.optString("songId")
-                    if (sId == "song_pending_sufi_moonlight") continue
+                    val isDemoSong = sId in listOf(
+                        "song_night_drive", "song_midnight_rain", "song_meri_kahani",
+                        "song_urban_punjabi", "song_synth_horizon", "song_pending_sufi_moonlight"
+                    ) || sId.startsWith("song_demo_")
+                    if (isDemoSong) continue
 
                     val rawViews = obj.optLong("totalViews", 0)
                     val rawLikes = obj.optLong("likesCount", 0)
                     val rawDislikes = obj.optLong("dislikesCount", 0)
-                    val isDemoSong = sId in listOf("song_night_drive", "song_midnight_rain", "song_meri_kahani", "song_urban_punjabi", "song_synth_horizon")
-                    val totalViews = if (isDemoSong && (rawViews == 124500L || rawViews == 248000L || rawViews == 58200L || rawViews == 89400L || rawViews == 72100L)) 0L else rawViews
-                    val likesCount = if (isDemoSong && (rawLikes == 14200L || rawLikes == 31200L || rawLikes == 7400L || rawLikes == 11800L || rawLikes == 9200L)) 0L else rawLikes
-                    val dislikesCount = if (isDemoSong && (rawDislikes == 120L || rawDislikes == 85L || rawDislikes == 42L || rawDislikes == 95L || rawDislikes == 60L)) 0L else rawDislikes
 
                     val dummyCreatorUids = setOf("user_rahul_9214", "user_simran_4012", "user_kabir_7731")
                     val dummyCreatorUsernames = setOf("rahulmusic", "simranbeats", "djkabir", "rjlofi", "rjbeats")
                     val currentUid = obj.optString("primaryCreatorUid")
                     val currentUsername = obj.optString("primaryCreatorUsername")
-                    if (sId != "song_meri_kahani" && (currentUid in dummyCreatorUids || currentUsername.lowercase() in dummyCreatorUsernames)) {
+                    if (currentUid in dummyCreatorUids || currentUsername.lowercase() in dummyCreatorUsernames) {
                         continue
                     }
 
-                    val finalCreatorUid = if (sId == "song_meri_kahani") "admin_rj_primary" else currentUid
-                    val finalCreatorName = if (sId == "song_meri_kahani") "Just RJ Musics" else obj.optString("primaryCreatorName")
-                    val finalCreatorUsername = if (sId == "song_meri_kahani") "justrjmusics" else currentUsername
-                    val finalMentions = if (sId == "song_meri_kahani") emptyList() else mentions
+                    val finalCreatorUid = currentUid
+                    val finalCreatorName = obj.optString("primaryCreatorName")
+                    val finalCreatorUsername = currentUsername
+                    val finalMentions = mentions
 
                     list.add(
                         Song(
@@ -611,22 +668,19 @@ class AppRepository(private val context: Context) {
                             moderationNote = obj.optString("moderationNote", ""),
                             createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
                             publishedAt = obj.optLong("publishedAt", System.currentTimeMillis()),
-                            totalViews = totalViews,
-                            uniqueListeners = if (isDemoSong && totalViews == 0L) 0L else obj.optLong("uniqueListeners", 0),
-                            likesCount = likesCount,
-                            dislikesCount = dislikesCount,
-                            downloadsCount = if (isDemoSong && totalViews == 0L) 0L else obj.optLong("downloadsCount", 0),
+                            totalViews = rawViews,
+                            uniqueListeners = obj.optLong("uniqueListeners", 0),
+                            likesCount = rawLikes,
+                            dislikesCount = rawDislikes,
+                            downloadsCount = obj.optLong("downloadsCount", 0),
                             isLifetimeConfirmed = obj.optBoolean("isLifetimeConfirmed", false) || obj.optString("moderationStatus") == "approved" || isSongLifetimeConfirmed(obj.optString("songId"))
                         )
                     )
                 }
-                if (list.isNotEmpty()) {
-                    list.filter { it.isLifetimeConfirmed }.forEach { markSongLifetimeConfirmed(it.songId) }
-                    val deletedSongs = getDeletedSongIds()
-                    val activeList = list.filterNot { it.songId in deletedSongs }
-                    val existingIds = activeList.map { it.songId }.toSet()
-                    _songs.value = activeList + _songs.value.filterNot { existingIds.contains(it.songId) || it.songId in deletedSongs }
-                }
+                val deletedSongs = getDeletedSongIds()
+                val activeList = list.filterNot { it.songId in deletedSongs }
+                _songs.value = activeList
+                saveCustomSongs()
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -657,236 +711,36 @@ class AppRepository(private val context: Context) {
             activeProfileId = activeProfile.profileId
         )
 
-        // Demo Songs with rich data and online streaming URLs
-        val sampleSongs = listOf(
-            Song(
-                songId = "song_night_drive",
-                title = "Night Drive",
-                description = "Cinematic midnight hip-hop drive with deep bass and atmospheric synths.",
-                primaryCreatorUid = admin.uid,
-                primaryCreatorName = "Just RJ Musics",
-                primaryCreatorUsername = "justrjmusics",
-                mentionedUsernames = emptyList(),
-                mentionedUserIds = emptyList(),
-                acceptedCollaboratorUids = emptyList(),
-                coverResId = R.drawable.cover_night_drive,
-                audioUrl = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-                genre = "Hip-Hop",
-                secondaryGenres = listOf("Rap", "Trap"),
-                tags = listOf("Night Vibe", "Bass", "Cruising", "Melodic"),
-                mood = "Confident & Dark",
-                energy = "High",
-                tempo = "132 BPM",
-                durationSec = 208,
-                lyrics = "[Intro]\nMidnight lights flickering down the highway...\nBass kicking through the floorboards...\n[Chorus]\nNight drive, chasing the moonlight glow\nCity asleep, but the music flows\nJust RJ Musics, we never slow down.",
-                totalViews = 0,
-                uniqueListeners = 0,
-                likesCount = 0,
-                dislikesCount = 0,
-                downloadsCount = 0,
-                shareCount = 0,
-                playlistAddCount = 0,
-                automaticTrendingScore = 0.0,
-                trendingPosition = 1,
-                isPinnedTrending = true,
-                uploadStatus = UploadStatus.PUBLISHED,
-                moderationStatus = "approved"
-            ),
-            Song(
-                songId = "song_midnight_rain",
-                title = "Midnight Rain (Lo-Fi Study)",
-                description = "Cozy vinyl tape noise with warm piano chords and soft rain textures.",
-                primaryCreatorUid = admin.uid,
-                primaryCreatorName = "Just RJ Musics",
-                primaryCreatorUsername = "justrjmusics",
-                coverResId = R.drawable.cover_lofi,
-                audioUrl = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
-                genre = "Lo-Fi",
-                secondaryGenres = listOf("Chill", "Acoustic"),
-                tags = listOf("Study", "Rain", "Relax", "Late Night", "Vinyl"),
-                mood = "Peaceful",
-                energy = "Low",
-                tempo = "84 BPM",
-                durationSec = 175,
-                lyrics = "[Instrumental with soft atmospheric whispers and raindrops]",
-                totalViews = 0,
-                uniqueListeners = 0,
-                likesCount = 0,
-                dislikesCount = 0,
-                downloadsCount = 0,
-                shareCount = 0,
-                playlistAddCount = 0,
-                automaticTrendingScore = 0.0,
-                trendingPosition = 2,
-                uploadStatus = UploadStatus.PUBLISHED,
-                moderationStatus = "approved"
-            ),
-            Song(
-                songId = "song_meri_kahani",
-                title = "Meri Kahani",
-                description = "Heartfelt soulful melody with acoustic guitar and expressive vocals.",
-                primaryCreatorUid = admin.uid,
-                primaryCreatorName = "Just RJ Musics",
-                primaryCreatorUsername = "justrjmusics",
-                mentionedUsernames = emptyList(),
-                mentionedUserIds = emptyList(),
-                acceptedCollaboratorUids = emptyList(),
-                coverResId = R.drawable.cover_lofi,
-                audioUrl = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
-                genre = "Romantic",
-                secondaryGenres = listOf("Bollywood", "Acoustic"),
-                tags = listOf("Heartfelt", "Soul", "Melody", "Guitar"),
-                mood = "Soulful",
-                energy = "Medium",
-                tempo = "92 BPM",
-                durationSec = 224,
-                lyrics = "Tere bina jeena lage adhura sa\nHar lamha dhoondhe bas tera nishaan...",
-                totalViews = 0,
-                uniqueListeners = 0,
-                likesCount = 0,
-                dislikesCount = 0,
-                downloadsCount = 0,
-                shareCount = 0,
-                playlistAddCount = 0,
-                automaticTrendingScore = 0.0,
-                trendingPosition = 3,
-                uploadStatus = UploadStatus.PUBLISHED,
-                moderationStatus = "approved"
-            ),
-            Song(
-                songId = "song_urban_punjabi",
-                title = "Desi Banger",
-                description = "Heavy bass modern Punjabi urban hit featuring hard synth drops.",
-                primaryCreatorUid = admin.uid,
-                primaryCreatorName = "Just RJ Musics",
-                primaryCreatorUsername = "justrjmusics",
-                coverResId = R.drawable.cover_night_drive,
-                audioUrl = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3",
-                genre = "Punjabi",
-                secondaryGenres = listOf("Hip-Hop", "Party"),
-                tags = listOf("Club", "Banger", "Desi", "Bass Boost"),
-                mood = "Energetic",
-                energy = "High",
-                tempo = "105 BPM",
-                durationSec = 196,
-                totalViews = 0,
-                uniqueListeners = 0,
-                likesCount = 0,
-                dislikesCount = 0,
-                downloadsCount = 0,
-                shareCount = 0,
-                playlistAddCount = 0,
-                automaticTrendingScore = 0.0,
-                trendingPosition = 4,
-                uploadStatus = UploadStatus.PUBLISHED,
-                moderationStatus = "approved"
-            ),
-            Song(
-                songId = "song_synth_horizon",
-                title = "Monochrome Horizons",
-                description = "Futuristic analog synth journey with silver textures.",
-                primaryCreatorUid = admin.uid,
-                primaryCreatorName = "Just RJ Musics",
-                primaryCreatorUsername = "justrjmusics",
-                coverResId = R.drawable.rj_logo,
-                audioUrl = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3",
-                genre = "Electronic",
-                secondaryGenres = listOf("Pop", "Workout"),
-                tags = listOf("Cyberpunk", "Silver", "Groove", "Synth"),
-                mood = "Uplifting",
-                energy = "High",
-                tempo = "126 BPM",
-                durationSec = 240,
-                totalViews = 0,
-                uniqueListeners = 0,
-                likesCount = 0,
-                dislikesCount = 0,
-                downloadsCount = 0,
-                shareCount = 0,
-                playlistAddCount = 0,
-                automaticTrendingScore = 0.0,
-                trendingPosition = 5,
-                uploadStatus = UploadStatus.PUBLISHED,
-                moderationStatus = "approved"
-            )
-        )
-
+        // Clean initial catalog (User requested all default demo songs removed for Spotify-like platform)
+        val sampleSongs = emptyList<Song>()
         val deletedSongs = getDeletedSongIds()
         _songs.value = sampleSongs.filterNot { it.songId in deletedSongs }
 
         // Featured Hero Slider
         _featuredSlides.value = listOf(
             FeaturedSlide(
-                id = "slide_1",
-                title = "Night Drive - Official Release",
-                subtitle = "Just RJ Musics • The dark cinematic anthem",
-                creatorName = "Just RJ Musics",
-                artworkResId = R.drawable.cover_night_drive,
-                destinationType = "SONG",
-                destinationId = "song_night_drive",
-                isPinned = true,
-                sortOrder = 1
-            ),
-            FeaturedSlide(
-                id = "slide_2",
-                title = "Midnight Lo-Fi Sessions",
-                subtitle = "Just RJ Musics • Pure relaxing rain & study tape loops",
-                creatorName = "Just RJ Musics",
-                artworkResId = R.drawable.cover_lofi,
-                destinationType = "SONG",
-                destinationId = "song_midnight_rain",
-                isPinned = false,
-                sortOrder = 2
-            ),
-            FeaturedSlide(
-                id = "slide_3",
-                title = "Just RJ Musics • Signature Sound",
-                subtitle = "Discover high-fidelity original streaming hits",
+                id = "slide_welcome",
+                title = "Welcome to Just RJ Musics",
+                subtitle = "Stream online music and search creators everywhere",
                 creatorName = "Just RJ Musics",
                 artworkResId = R.drawable.rj_logo,
-                destinationType = "SONG",
-                destinationId = "song_synth_horizon",
-                isPinned = false,
-                sortOrder = 3
-            )
-        ).filterNot { it.destinationId in deletedSongs }
-
-        // Initial Playlists
-        _playlists.value = listOf(
-            Playlist(
-                playlistId = "pl_midnight_vibes",
-                title = "Midnight Aesthetics",
-                description = "Curated dark melodies, lo-fi chords & midnight cruising beats.",
-                ownerUid = admin.uid,
-                ownerName = "Just RJ Musics",
-                isPublic = true,
-                songIds = listOf("song_night_drive", "song_midnight_rain", "song_synth_horizon").filterNot { it in deletedSongs }
-            ),
-            Playlist(
-                playlistId = "pl_desi_workout",
-                title = "Urban Desi & Workout",
-                description = "High energy Punjabi hip-hop and high tempo bangers.",
-                ownerUid = admin.uid,
-                ownerName = "Just RJ Musics",
-                isPublic = true,
-                songIds = listOf("song_urban_punjabi", "song_night_drive").filterNot { it in deletedSongs }
+                destinationType = "EXPLORE",
+                destinationId = "explore",
+                isPinned = true,
+                sortOrder = 1
             )
         )
+
+        // Initial Playlists
+        _playlists.value = emptyList()
 
         // Initial Notifications
         _notifications.value = listOf(
             NotificationItem(
                 recipientUid = admin.uid,
                 title = "Welcome to Just RJ Musics",
-                message = "Your official creator & administrator platform is fully initialized with luxury monochrome branding.",
+                message = "Your official creator platform is ready. Upload songs and discover music.",
                 type = "alert"
-            ),
-            NotificationItem(
-                recipientUid = admin.uid,
-                title = "Song Milestone Reached",
-                message = "'Night Drive' crossed 100K streams! Trending score updated to #1.",
-                type = "trending",
-                actionTargetId = "song_night_drive"
             )
         )
 
@@ -1349,9 +1203,49 @@ class AppRepository(private val context: Context) {
         val cleanTitle = title.trim()
         val cleanDesc = description.trim()
         val cleanGenre = if (genre.isNotBlank()) genre.trim() else "Pop"
+        val sId = "song_upload_" + UUID.randomUUID().toString().take(8)
+
+        // Process audio URI: if content:// from local picker, copy to internal filesDir for permanent playback
+        var finalAudioUrl = audioUri.trim()
+        if (finalAudioUrl.startsWith("content://")) {
+            try {
+                val input = context.contentResolver.openInputStream(android.net.Uri.parse(finalAudioUrl))
+                if (input != null) {
+                    val uploadDir = java.io.File(context.filesDir, "uploads")
+                    if (!uploadDir.exists()) uploadDir.mkdirs()
+                    val audioFile = java.io.File(uploadDir, "${sId}.mp3")
+                    audioFile.outputStream().use { out -> input.copyTo(out) }
+                    input.close()
+                    finalAudioUrl = audioFile.absolutePath
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        if (finalAudioUrl.isBlank()) {
+            finalAudioUrl = getDefaultStreamUrl(cleanGenre)
+        }
+
+        // Process cover URI: if content://, copy to internal filesDir
+        var finalCoverUrl = coverUri.trim()
+        if (finalCoverUrl.startsWith("content://")) {
+            try {
+                val input = context.contentResolver.openInputStream(android.net.Uri.parse(finalCoverUrl))
+                if (input != null) {
+                    val uploadDir = java.io.File(context.filesDir, "uploads")
+                    if (!uploadDir.exists()) uploadDir.mkdirs()
+                    val coverFile = java.io.File(uploadDir, "${sId}_cover.jpg")
+                    coverFile.outputStream().use { out -> input.copyTo(out) }
+                    input.close()
+                    finalCoverUrl = coverFile.absolutePath
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
 
         val newSong = Song(
-            songId = "song_upload_" + UUID.randomUUID().toString().take(8),
+            songId = sId,
             title = cleanTitle,
             description = cleanDesc,
             primaryCreatorUid = user.uid,
@@ -1362,9 +1256,9 @@ class AppRepository(private val context: Context) {
             mentionedUserIds = emptyList(),
             acceptedCollaboratorUids = emptyList(),
             pendingCollaboratorUids = mentionedUsernames,
-            coverUrl = coverUri,
-            coverResId = if (coverUri.isBlank()) R.drawable.cover_night_drive else null,
-            audioUrl = if (audioUri.isNotBlank()) audioUri else getDefaultStreamUrl(cleanGenre),
+            coverUrl = finalCoverUrl,
+            coverResId = if (finalCoverUrl.isBlank()) R.drawable.cover_night_drive else null,
+            audioUrl = finalAudioUrl,
             genre = cleanGenre,
             secondaryGenres = emptyList(),
             tags = listOf(cleanGenre, "Original"),
@@ -1375,9 +1269,9 @@ class AppRepository(private val context: Context) {
             lyrics = lyrics,
             explicit = explicit,
             allowDownload = allowDownload,
-            uploadStatus = if (user.isAdmin) UploadStatus.PUBLISHED else UploadStatus.PENDING_REVIEW,
-            moderationStatus = if (user.isAdmin) "approved" else "pending",
-            isLifetimeConfirmed = user.isAdmin,
+            uploadStatus = UploadStatus.PUBLISHED,
+            moderationStatus = "approved",
+            isLifetimeConfirmed = true,
             publishedAt = System.currentTimeMillis(),
             totalViews = 0,
             likesCount = 0,
@@ -1401,17 +1295,15 @@ class AppRepository(private val context: Context) {
             _collaborationInvites.value = _collaborationInvites.value + invite
         }
 
-        // Send notification to Admin moderation queue for non-admin submissions
-        if (!user.isAdmin) {
-            val adminAlert = NotificationItem(
-                recipientUid = "admin_rj_primary",
-                title = "New Song Pending Confirmation",
-                message = "${user.displayName} (@${user.username}) submitted '${newSong.title}' for review.",
-                type = "alert",
-                actionTargetId = newSong.songId
-            )
-            _notifications.value = listOf(adminAlert) + _notifications.value
-        }
+        // Send alert for platform activity
+        val broadcastAlert = NotificationItem(
+            recipientUid = user.uid,
+            title = "Track Published Globally",
+            message = "'${newSong.title}' is now live on Just RJ Musics and playable by all listeners.",
+            type = "release",
+            actionTargetId = newSong.songId
+        )
+        _notifications.value = listOf(broadcastAlert) + _notifications.value
 
         return newSong
     }
